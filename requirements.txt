@@ -1,11 +1,10 @@
 # Core Streamlit and Web Framework
 streamlit>=1.28.0
-streamlit-option-menu>=0.3.6
 
 # Data Processing and Analysis
-pandas>=2.0.3
-numpy>=1.24.3
-scipy>=1.11.1
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
 
 # Machine Learning
 scikit-learn>=1.3.0
@@ -14,14 +13,12 @@ scikit-learn>=1.3.0
 plotly>=5.15.0
 
 # Statistical Plotting
-seaborn>=0.12.2
-matplotlib>=3.7.2
+seaborn>=0.12.0
+matplotlib>=3.7.0
 
 # Additional Utilities (Optional but Recommended)
-pillow>=10.0.0  # For image processing if needed
-openpyxl>=3.1.2  # For Excel file support
-xlsxwriter>=3.1.2  # For Excel export functionality
+pillow>=9.0.0  # For image processing if needed
+openpyxl>=3.1.0  # For Excel file support
 
 # Performance and Caching (Optional)
 streamlit-aggrid>=0.3.4  # Enhanced data tables
-streamlit-plotly-events>=0.1.6  # Interactive plot events
