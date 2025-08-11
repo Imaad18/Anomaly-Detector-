@@ -1,276 +1,399 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 from sklearn.ensemble import IsolationForest
 from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
-from io import BytesIO
-import base64
-from groq import Groq
-import asyncio
-import logging
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy import stats
+import warnings
+warnings.filterwarnings('ignore')
 
-# Logging Setup
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Page config
+st.set_page_config(
+    page_title="🚀 AnomalyHunter Pro",
+    page_icon="🔍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Custom CSS
-def load_css(theme="light"):
-    if theme == "dark":
-        return """
-        <style>
-        .main { background: linear-gradient(to right, #1f2937, #111827); color: #f3f4f6; }
-        .stButton>button { background-color: #6366f1; color: white; border-radius: 10px; padding: 10px 20px; transition: all 0.3s ease; }
-        .stButton>button:hover { background-color: #4f46e5; transform: scale(1.05); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
-        .stSlider { background: #374151; border-radius: 8px; }
-        .stTextInput input { border: 2px solid #4f46e5; border-radius: 8px; }
-        .anomaly-highlight { animation: fadeIn 1s ease-in-out; color: #ef4444; }
-        .insight-highlight { animation: slideIn 0.5s ease; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        .tooltip { position: relative; display: inline-block; }
-        .tooltip .tooltiptext { visibility: hidden; width: 160px; background-color: #4b5563; color: #f3f4f6; text-align: center; border-radius: 6px; padding: 8px; position: absolute; z-index: 1; bottom: 125%; left: 50%; margin-left: -80px; opacity: 0; transition: opacity 0.3s; }
-        .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
-        </style>
-        """
-    else:
-        return """
-        <style>
-        .main { background: linear-gradient(to right, #f0f2f6, #e0e7ff); color: #1f2937; }
-        .stButton>button { background-color: #4f46e5; color: white; border-radius: 10px; padding: 10px 20px; transition: all 0.3s ease; }
-        .stButton>button:hover { background-color: #4338ca; transform: scale(1.05); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
-        .stSlider { background: #e0e7ff; border-radius: 8px; }
-        .stTextInput input { border: 2px solid #4f46e5; border-radius: 8px; }
-        .anomaly-highlight { animation: fadeIn 1s ease-in-out; color: #ef4444; }
-        .insight-highlight { animation: slideIn 0.5s ease; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        .tooltip { position: relative; display: inline-block; }
-        .tooltip .tooltiptext { visibility: hidden; width: 160px; background-color: #6b7280; color: #fff; text-align: center; border-radius: 6px; padding: 8px; position: absolute; z-index: 1; bottom: 125%; left: 50%; margin-left: -80px; opacity: 0; transition: opacity 0.3s; }
-        .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
-        </style>
-        """
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 3rem;
+        font-weight: bold;
+        text-align: center;
+        background: linear-gradient(90deg, #FF6B6B, #4ECDC4, #45B7D1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 2rem;
+    }
+    
+    .metric-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        margin: 0.5rem 0;
+    }
+    
+    .algorithm-box {
+        border: 2px solid #4ECDC4;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 1rem 0;
+        background: rgba(78, 205, 196, 0.1);
+    }
+    
+    .stSelectbox > div > div {
+        background-color: #2E86AB;
+        color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-st.markdown(load_css(st.session_state.get("theme", "light")), unsafe_allow_html=True)
-
-st.title("AnomalyScope AI: Advanced Dataset Anomaly Detector")
-st.markdown("<p style='font-weight: bold;'>Unleash AI-driven insights to dominate your hackathon! Detect anomalies with precision.</p>", unsafe_allow_html=True)
-
-# Session State
-if 'df' not in st.session_state:
-    st.session_state.df = None
-if 'anomalies' not in st.session_state:
-    st.session_state.anomalies = None
-if 'client' not in st.session_state:
-    st.session_state.client = None
+# Title
+st.markdown('<h1 class="main-header">🚀 AnomalyHunter Pro</h1>', unsafe_allow_html=True)
+st.markdown("### *Next-Generation Anomaly Detection Platform*")
 
 # Sidebar
 with st.sidebar:
-    st.header("Advanced Settings")
-    groq_key = st.text_input("Groq API Key (Optional)", type="password", help="Get a free key at console.groq.com")
-    if groq_key and st.button("Validate API Key"):
-        with st.spinner("Validating..."):
-            try:
-                client = Groq(api_key=groq_key)
-                test_response = client.chat.completions.create(
-                    messages=[{"role": "user", "content": "Test"}],
-                    model="llama-3.3-70b-versatile"
-                )
-                st.session_state.client = client
-                st.success("API Key Valid!")
-            except Exception as e:
-                st.error(f"Invalid Key: {str(e)}")
-                st.session_state.client = None
-    else:
-        st.session_state.client = None
-    model_type = st.selectbox("Anomaly Model", ["Isolation Forest", "DBSCAN", "Local Outlier Factor"])
-    sensitivity = st.slider("Sensitivity (%)", 1, 20, 5, help="Higher detects more anomalies")
-    chart_type = st.selectbox("Chart Type", ["Scatter", "Line", "Heatmap"])
-    preprocess = st.checkbox("Auto-Preprocess (Fill/Normalize)", value=True)
-    add_context = st.checkbox("Enrich with Context", value=True)
-    context_input = st.text_input("Event/Date for Context (e.g., '2025-08-10 market crash')") if add_context else ""
-    st.markdown("<div class='tooltip'>ℹ️<span class='tooltiptext'>Context suggests causes; add NewsAPI for real-time.</span></div>", unsafe_allow_html=True)
+    st.markdown("## 🎯 Configuration Panel")
+    
+    # Data source selection
+    data_source = st.selectbox(
+        "📊 Select Data Source",
+        ["Upload CSV", "Generate Synthetic Data", "Live Data Stream"]
+    )
+    
+    # Algorithm selection
+    algorithm = st.selectbox(
+        "🤖 Choose Algorithm",
+        ["Isolation Forest", "DBSCAN", "One-Class SVM", "Local Outlier Factor", "Statistical Z-Score", "Ensemble Method"]
+    )
+    
+    # Parameters
+    st.markdown("### ⚙️ Algorithm Parameters")
+    
+    if algorithm == "Isolation Forest":
+        contamination = st.slider("Contamination Rate", 0.01, 0.5, 0.1)
+        n_estimators = st.slider("Number of Estimators", 10, 200, 100)
+    elif algorithm == "DBSCAN":
+        eps = st.slider("Epsilon", 0.1, 2.0, 0.5)
+        min_samples = st.slider("Min Samples", 2, 20, 5)
+    elif algorithm == "One-Class SVM":
+        nu = st.slider("Nu (Outlier Fraction)", 0.01, 0.5, 0.1)
+        gamma = st.selectbox("Gamma", ["scale", "auto"])
+    elif algorithm == "Local Outlier Factor":
+        n_neighbors = st.slider("Number of Neighbors", 5, 50, 20)
+        contamination = st.slider("Contamination Rate", 0.01, 0.5, 0.1)
+    
+    # Visualization options
+    st.markdown("### 🎨 Visualization")
+    show_3d = st.checkbox("3D Visualization", value=True)
+    show_heatmap = st.checkbox("Correlation Heatmap", value=True)
 
-# Async Groq Call
-async def get_llm_explanation(prompt):
-    logger.info("Calling Groq API...")
-    client = st.session_state.client
-    if client:
-        try:
-            chat_completion = await asyncio.to_thread(client.chat.completions.create,
-                messages=[{"role": "user", "content": prompt}],
-                model="llama-3.3-70b-versatile"
-            )
-            logger.info("Groq API call successful")
-            return chat_completion.choices[0].message.content
-        except Exception as e:
-            logger.error(f"Groq API error: {str(e)}")
-            return f"Fallback: Groq error - {str(e)}"
-    logger.warning("No valid Groq key, using fallback")
-    return "Fallback: No valid Groq key. Check your input."
+# Main content area
+col1, col2 = st.columns([2, 1])
 
-# File Upload
-uploaded_file = st.file_uploader("Upload CSV/JSON (Max 10MB)", type=["csv", "json"])
-
-if uploaded_file:
-    with st.spinner("Analyzing dataset..."):
-        progress = st.progress(0)
-        try:
-            logger.info("Starting dataset processing...")
-            if uploaded_file.size > 10 * 1024 * 1024:
-                st.error("File too large (>10MB). Use a smaller dataset.")
-                st.stop()
-
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_json(uploaded_file)
-
-            if len(df) < 5:
-                st.error("Dataset too small (min 5 rows).")
-                st.stop()
-            if len(df) > 10000:
-                st.warning("Large dataset detected (>10k rows). Sampling first 10k rows.")
-                df = df.iloc[:10000]
-
-            if preprocess:
-                df = df.fillna(df.mean(numeric_only=True))
-                numeric_cols = df.select_dtypes(include=np.number).columns
-                if len(numeric_cols) == 0:
-                    st.error("No numeric data found.")
-                    st.stop()
-                df[numeric_cols] = (df[numeric_cols] - df[numeric_cols].min()) / (df[numeric_cols].max() - df[numeric_cols].min() + 1e-8)
-
-            st.session_state.df = df
-            st.write("Dataset Preview", df.head())
-
-            # Quick Insights
-            if st.button("Quick Insights"):
-                logger.info("Generating quick insights...")
-                prompt = f"Summarize key stats for dataset: {df.describe().to_string()[:200]}"
-                insight = asyncio.run(get_llm_explanation(prompt))
-                st.markdown(f"<p class='insight-highlight'>📊 {insight}</p>", unsafe_allow_html=True)
-
-            # Anomaly Detection
-            numeric_cols = df.select_dtypes(include=np.number).columns
-            data = df[numeric_cols].values
-            st.write(f"Processing {len(df)} rows with {model_type}...")
-            logger.info(f"Running {model_type} on {len(df)} rows")
-            if model_type == "Isolation Forest":
-                model = IsolationForest(contamination=sensitivity/100, random_state=42)
-                preds = model.fit_predict(data)
-            elif model_type == "DBSCAN":
-                model = DBSCAN(eps=0.5, min_samples=5)
-                preds = model.fit_predict(data)
-                preds = np.where(preds == -1, -1, 1)
-            else:
-                model = LocalOutlierFactor(n_neighbors=20, contamination=sensitivity/100)
-                preds = model.fit_predict(data)
-
-            df["anomaly"] = preds
-            st.session_state.anomalies = df[df["anomaly"] == -1]
-            logger.info(f"Detected {len(st.session_state.anomalies)} anomalies")
-            progress.progress(100)
-        except Exception as e:
-            logger.error(f"Error processing dataset: {str(e)}")
-            st.error(f"Error processing dataset: {str(e)}")
-            st.stop()
-
-# Sample Datasets
-st.subheader("Try a Sample Dataset")
-sample_type = st.selectbox("Select Sample Dataset", ["None", "Sales Data", "Sensor Logs"], key="sample_select")
-if st.button("Load Sample Data"):
-    logger.info(f"Loading sample dataset: {sample_type}")
-    try:
-        if sample_type == "Sales Data":
-            df = pd.DataFrame({
-                "Date": pd.date_range("2025-01-01", periods=30),
-                "Sales": [100, 102, 99, 101, 150, 148, 155, 100, 98, 103] * 3  # Static for reliability
-            })
-        elif sample_type == "Sensor Logs":
-            df = pd.DataFrame({
-                "Time": pd.date_range("2025-01-01", periods=30),
-                "Temp": [25, 24.5, 25.2, 26, 35, 34.8, 36, 25.1, 24.9, 25.3] * 3
-            })
+with col1:
+    # Data loading/generation
+    if data_source == "Upload CSV":
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        if uploaded_file is not None:
+            data = pd.read_csv(uploaded_file)
+            st.success(f"✅ Loaded {len(data)} records with {len(data.columns)} features")
         else:
-            st.warning("Please select a valid sample dataset.")
-            st.stop()
+            st.info("👆 Please upload a CSV file to get started")
+            data = None
+    
+    elif data_source == "Generate Synthetic Data":
+        st.markdown("### 🧬 Synthetic Data Generator")
+        
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            n_samples = st.number_input("Number of Samples", 100, 10000, 1000)
+        with col_b:
+            n_features = st.number_input("Number of Features", 2, 20, 5)
+        with col_c:
+            anomaly_rate = st.slider("Anomaly Rate (%)", 1, 20, 10)
+        
+        if st.button("🎲 Generate Data", type="primary"):
+            # Generate normal data
+            np.random.seed(42)
+            normal_data = np.random.multivariate_normal(
+                mean=np.zeros(n_features),
+                cov=np.eye(n_features),
+                size=int(n_samples * (1 - anomaly_rate/100))
+            )
+            
+            # Generate anomalies
+            n_anomalies = int(n_samples * anomaly_rate/100)
+            anomaly_data = np.random.multivariate_normal(
+                mean=np.ones(n_features) * 3,
+                cov=np.eye(n_features) * 2,
+                size=n_anomalies
+            )
+            
+            # Combine data
+            all_data = np.vstack([normal_data, anomaly_data])
+            true_labels = np.hstack([np.zeros(len(normal_data)), np.ones(len(anomaly_data))])
+            
+            # Create DataFrame
+            columns = [f'Feature_{i+1}' for i in range(n_features)]
+            data = pd.DataFrame(all_data, columns=columns)
+            data['True_Anomaly'] = true_labels
+            
+            st.success(f"✅ Generated {len(data)} samples with {anomaly_rate}% anomalies")
+    
+    elif data_source == "Live Data Stream":
+        st.markdown("### 📡 Live Data Stream Simulation")
+        
+        if 'stream_data' not in st.session_state:
+            st.session_state.stream_data = pd.DataFrame()
+        
+        if st.button("▶️ Start Stream"):
+            # Simulate streaming data
+            new_batch = np.random.multivariate_normal([0, 0], [[1, 0.5], [0.5, 1]], 50)
+            # Add some anomalies
+            anomalies = np.random.multivariate_normal([4, 4], [[1, 0], [0, 1]], 5)
+            batch_data = np.vstack([new_batch, anomalies])
+            
+            new_df = pd.DataFrame(batch_data, columns=['X', 'Y'])
+            st.session_state.stream_data = pd.concat([st.session_state.stream_data, new_df])
+            
+            data = st.session_state.stream_data.tail(1000)  # Keep last 1000 points
+            st.success(f"📊 Streaming... {len(data)} points collected")
 
-        st.session_state.df = df
-        st.write("Sample Dataset Loaded:", df.head())
-        logger.info("Sample dataset loaded successfully")
-    except Exception as e:
-        logger.error(f"Error loading sample dataset: {str(e)}")
-        st.error(f"Error loading sample dataset: {str(e)}")
+# Anomaly detection logic
+if 'data' in locals() and data is not None:
+    # Prepare data for analysis
+    numeric_cols = data.select_dtypes(include=[np.number]).columns
+    if 'True_Anomaly' in numeric_cols:
+        numeric_cols = numeric_cols.drop('True_Anomaly')
+    
+    if len(numeric_cols) >= 2:
+        X = data[numeric_cols].values
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        # Apply selected algorithm
+        with st.spinner(f"🔍 Running {algorithm}..."):
+            if algorithm == "Isolation Forest":
+                model = IsolationForest(contamination=contamination, n_estimators=n_estimators, random_state=42)
+                predictions = model.fit_predict(X_scaled)
+                scores = model.decision_function(X_scaled)
+                
+            elif algorithm == "DBSCAN":
+                model = DBSCAN(eps=eps, min_samples=min_samples)
+                cluster_labels = model.fit_predict(X_scaled)
+                predictions = np.where(cluster_labels == -1, -1, 1)
+                scores = np.zeros(len(predictions))  # DBSCAN doesn't provide scores
+                
+            elif algorithm == "One-Class SVM":
+                model = OneClassSVM(nu=nu, gamma=gamma)
+                predictions = model.fit_predict(X_scaled)
+                scores = model.decision_function(X_scaled)
+                
+            elif algorithm == "Local Outlier Factor":
+                model = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination)
+                predictions = model.fit_predict(X_scaled)
+                scores = model.negative_outlier_factor_
+                
+            elif algorithm == "Statistical Z-Score":
+                z_scores = np.abs(stats.zscore(X_scaled, axis=0))
+                max_z_scores = np.max(z_scores, axis=1)
+                threshold = st.sidebar.slider("Z-Score Threshold", 1.0, 5.0, 3.0)
+                predictions = np.where(max_z_scores > threshold, -1, 1)
+                scores = -max_z_scores
+                
+            elif algorithm == "Ensemble Method":
+                # Combine multiple algorithms
+                iso_forest = IsolationForest(contamination=0.1, random_state=42)
+                svm = OneClassSVM(nu=0.1)
+                lof = LocalOutlierFactor(contamination=0.1)
+                
+                pred1 = iso_forest.fit_predict(X_scaled)
+                pred2 = svm.fit_predict(X_scaled)
+                pred3 = lof.fit_predict(X_scaled)
+                
+                # Majority voting
+                ensemble_pred = np.array([pred1, pred2, pred3])
+                predictions = np.where(np.sum(ensemble_pred == -1, axis=0) >= 2, -1, 1)
+                scores = iso_forest.decision_function(X_scaled)
+        
+        # Convert predictions to binary (1 for normal, 0 for anomaly)
+        anomaly_labels = (predictions == -1).astype(int)
+        
+        # Results summary
+        n_anomalies = np.sum(anomaly_labels)
+        anomaly_percentage = (n_anomalies / len(data)) * 100
+        
+        with col2:
+            st.markdown("## 📊 Detection Results")
+            
+            st.markdown(f"""
+            <div class="metric-container">
+                <h3>🎯 {n_anomalies} Anomalies Detected</h3>
+                <p>Anomaly Rate: {anomaly_percentage:.2f}%</p>
+                <p>Normal Points: {len(data) - n_anomalies}</p>
+                <p>Algorithm: {algorithm}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Performance metrics (if ground truth available)
+            if 'True_Anomaly' in data.columns:
+                from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+                
+                y_true = data['True_Anomaly'].values
+                y_pred = anomaly_labels
+                
+                accuracy = np.mean(y_true == y_pred)
+                if len(np.unique(y_true)) > 1 and len(np.unique(scores)) > 1:
+                    try:
+                        auc_score = roc_auc_score(y_true, -scores)
+                        st.metric("🎯 AUC Score", f"{auc_score:.3f}")
+                    except:
+                        st.metric("🎯 Accuracy", f"{accuracy:.3f}")
+                
+                st.metric("🎯 Accuracy", f"{accuracy:.3f}")
+        
+        # Visualizations
+        st.markdown("## 📈 Interactive Visualizations")
+        
+        # Main scatter plot
+        if len(numeric_cols) >= 2:
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=('Anomaly Detection Results', 'Anomaly Scores Distribution', 
+                              'Feature Correlation', '3D Visualization' if show_3d and len(numeric_cols) >= 3 else 'PCA Projection'),
+                specs=[[{"type": "scatter"}, {"type": "histogram"}],
+                       [{"type": "heatmap"}, {"type": "scatter3d" if show_3d and len(numeric_cols) >= 3 else "scatter"}]]
+            )
+            
+            # Main scatter plot
+            colors = ['red' if x == 1 else 'blue' for x in anomaly_labels]
+            fig.add_trace(
+                go.Scatter(
+                    x=X[:, 0], y=X[:, 1],
+                    mode='markers',
+                    marker=dict(color=colors, size=8, opacity=0.7),
+                    name='Data Points',
+                    text=[f'Point {i}<br>Anomaly: {"Yes" if anomaly_labels[i] else "No"}' for i in range(len(X))],
+                    hovertemplate='%{text}<extra></extra>'
+                ),
+                row=1, col=1
+            )
+            
+            # Anomaly scores histogram
+            fig.add_trace(
+                go.Histogram(x=scores, name='Anomaly Scores', opacity=0.7),
+                row=1, col=2
+            )
+            
+            # Correlation heatmap
+            if show_heatmap:
+                corr_matrix = data[numeric_cols].corr()
+                fig.add_trace(
+                    go.Heatmap(
+                        z=corr_matrix.values,
+                        x=corr_matrix.columns,
+                        y=corr_matrix.columns,
+                        colorscale='RdBu',
+                        name='Correlation'
+                    ),
+                    row=2, col=1
+                )
+            
+            # 3D or PCA plot
+            if show_3d and len(numeric_cols) >= 3:
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=X[:, 0], y=X[:, 1], z=X[:, 2],
+                        mode='markers',
+                        marker=dict(color=colors, size=5),
+                        name='3D View'
+                    ),
+                    row=2, col=2
+                )
+            else:
+                # PCA projection
+                pca = PCA(n_components=2)
+                X_pca = pca.fit_transform(X_scaled)
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=X_pca[:, 0], y=X_pca[:, 1],
+                        mode='markers',
+                        marker=dict(color=colors, size=8, opacity=0.7),
+                        name='PCA Projection'
+                    ),
+                    row=2, col=2
+                )
+            
+            fig.update_layout(height=800, showlegend=True, title_text="🔍 Comprehensive Anomaly Analysis")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Feature importance (for tree-based methods)
+        if hasattr(model, 'feature_importances_') or algorithm == "Isolation Forest":
+            st.markdown("## 🎯 Feature Importance")
+            if hasattr(model, 'feature_importances_'):
+                importance_df = pd.DataFrame({
+                    'Feature': numeric_cols,
+                    'Importance': model.feature_importances_
+                }).sort_values('Importance', ascending=False)
+                
+                fig_imp = px.bar(importance_df, x='Importance', y='Feature', orientation='h',
+                               title="Feature Importance for Anomaly Detection")
+                st.plotly_chart(fig_imp, use_container_width=True)
+        
+        # Detailed results table
+        st.markdown("## 📋 Detailed Results")
+        
+        result_df = data.copy()
+        result_df['Anomaly_Detected'] = anomaly_labels
+        result_df['Anomaly_Score'] = scores
+        result_df['Risk_Level'] = pd.cut(scores, bins=3, labels=['Low', 'Medium', 'High'])
+        
+        # Filter options
+        col_filter1, col_filter2 = st.columns(2)
+        with col_filter1:
+            show_anomalies_only = st.checkbox("Show Anomalies Only")
+        with col_filter2:
+            risk_filter = st.multiselect("Risk Level Filter", ['Low', 'Medium', 'High'], 
+                                       default=['Low', 'Medium', 'High'])
+        
+        # Apply filters
+        filtered_df = result_df.copy()
+        if show_anomalies_only:
+            filtered_df = filtered_df[filtered_df['Anomaly_Detected'] == 1]
+        
+        filtered_df = filtered_df[filtered_df['Risk_Level'].isin(risk_filter)]
+        
+        st.dataframe(filtered_df, use_container_width=True)
+        
+        # Download results
+        csv = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Results as CSV",
+            data=csv,
+            file_name=f'anomaly_detection_results_{algorithm.lower().replace(" ", "_")}.csv',
+            mime='text/csv'
+        )
 
-if st.session_state.anomalies is not None:
-    anomalies = st.session_state.anomalies
-    df = st.session_state.df
-
-    st.markdown("<h3 class='anomaly-highlight'>Detected Anomalies</h3>", unsafe_allow_html=True)
-    st.dataframe(anomalies.style.highlight_max(color='red', axis=0))
-
-    # Visualization
-    fig = None
-    numeric_cols = df.select_dtypes(include=np.number).columns
-    if chart_type == "Scatter":
-        fig = px.scatter(df, x=df.index, y=numeric_cols[0], color="anomaly",
-                         color_discrete_map={1: "blue", -1: "red"}, title="Anomalies")
-    elif chart_type == "Line":
-        fig = px.line(df, x=df.index, y=numeric_cols[0], title="Time-Series")
-        fig.add_scatter(x=anomalies.index, y=anomalies[numeric_cols[0]], mode='markers', marker=dict(color='red', size=10))
-    else:
-        corr = df[numeric_cols].corr()
-        fig = go.Figure(data=go.Heatmap(z=corr.values, x=corr.columns, y=corr.columns, colorscale='Viridis'))
-        fig.update_layout(title="Correlation Heatmap")
-
-    if fig:
-        fig.update_layout(transition_duration=500, autosize=True)
-        st.plotly_chart(fig, use_container_width=True)
-
-    # LLM Explanations
-    st.markdown("<h3>Anomaly Explanations (Powered by Groq)</h3>", unsafe_allow_html=True)
-    explanations = []
-    for idx, row in anomalies.iterrows():
-        value = row[numeric_cols[0]]
-        mean_dev = abs(value - df[numeric_cols[0]].mean())
-        prompt = f"Explain why value {value:.2f} at index {idx} is an anomaly. Deviation: {mean_dev:.2f}. Dataset: {df.describe().to_string()[:200]}."
-        if add_context and context_input:
-            prompt += f" Context: {context_input}. Suggest real-world causes like X trends or events."
-        explanation = asyncio.run(get_llm_explanation(prompt))
-        explanations.append([idx, value, explanation])
-        st.markdown(f"<p class='tooltip'>Anomaly at {idx}: {explanation}<span class='tooltiptext'>LLM Insight</span></p>", unsafe_allow_html=True)
-
-    # PDF Report
-    if st.button("Download Enhanced PDF Report"):
-        logger.info("Generating PDF report...")
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter)
-        styles = getSampleStyleSheet()
-        elements = []
-
-        elements.append(Paragraph("AnomalyScope AI Report", styles['Title']))
-        elements.append(Spacer(1, 12))
-        elements.append(Paragraph(f"Detected {len(anomalies)} anomalies with {model_type}.", styles['Normal']))
-
-        data = [["Index", "Value", "Explanation"]] + explanations
-        t = Table(data)
-        t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), '#4f46e5'), ('TEXTCOLOR', (0,0), (-1,0), 'white')]))
-        elements.append(t)
-
-        img_data = fig.to_image(format="png", width=600, height=400)
-        img_buffer = BytesIO(img_data)
-        elements.append(RLImage(img_buffer, width=500, height=300))
-
-        doc.build(elements)
-        buffer.seek(0)
-        b64 = base64.b64encode(buffer.read()).decode()
-        href = f'<a href="data:application/pdf;base64,{b64}" download="anomaly_report.pdf">Download PDF</a>'
-        st.markdown(href, unsafe_allow_html=True)
-        logger.info("PDF report generated")
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #666;">
+    <p>🚀 <strong>AnomalyHunter Pro</strong> - Built for Hackathon Excellence</p>
+    <p>Powered by Advanced ML Algorithms | Real-time Detection | Interactive Visualizations</p>
+</div>
+""", unsafe_allow_html=True)
