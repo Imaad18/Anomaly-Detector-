@@ -14,6 +14,11 @@ from io import BytesIO
 import base64
 from groq import Groq
 import asyncio
+import logging
+
+# Logging Setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Custom CSS
 def load_css(theme="light"):
@@ -68,8 +73,8 @@ if 'client' not in st.session_state:
 # Sidebar
 with st.sidebar:
     st.header("Advanced Settings")
-    groq_key = st.text_input("Groq API Key", type="password", help="Get a free key at console.groq.com")
-    if st.button("Validate API Key"):
+    groq_key = st.text_input("Groq API Key (Optional)", type="password", help="Get a free key at console.groq.com")
+    if groq_key and st.button("Validate API Key"):
         with st.spinner("Validating..."):
             try:
                 client = Groq(api_key=groq_key)
@@ -81,6 +86,9 @@ with st.sidebar:
                 st.success("API Key Valid!")
             except Exception as e:
                 st.error(f"Invalid Key: {str(e)}")
+                st.session_state.client = None
+    else:
+        st.session_state.client = None
     model_type = st.selectbox("Anomaly Model", ["Isolation Forest", "DBSCAN", "Local Outlier Factor"])
     sensitivity = st.slider("Sensitivity (%)", 1, 20, 5, help="Higher detects more anomalies")
     chart_type = st.selectbox("Chart Type", ["Scatter", "Line", "Heatmap"])
@@ -91,6 +99,7 @@ with st.sidebar:
 
 # Async Groq Call
 async def get_llm_explanation(prompt):
+    logger.info("Calling Groq API...")
     client = st.session_state.client
     if client:
         try:
@@ -98,32 +107,44 @@ async def get_llm_explanation(prompt):
                 messages=[{"role": "user", "content": prompt}],
                 model="llama-3.3-70b-versatile"
             )
+            logger.info("Groq API call successful")
             return chat_completion.choices[0].message.content
         except Exception as e:
+            logger.error(f"Groq API error: {str(e)}")
             return f"Fallback: Groq error - {str(e)}"
+    logger.warning("No valid Groq key, using fallback")
     return "Fallback: No valid Groq key. Check your input."
 
 # File Upload
-uploaded_file = st.file_uploader("Upload CSV/JSON", type=["csv", "json"])
+uploaded_file = st.file_uploader("Upload CSV/JSON (Max 10MB)", type=["csv", "json"])
 
 if uploaded_file:
     with st.spinner("Analyzing dataset..."):
         progress = st.progress(0)
-        for i in range(100):
-            asyncio.run(asyncio.sleep(0.01))
-            progress.progress(i + 1)
+        try:
+            logger.info("Starting dataset processing...")
+            if uploaded_file.size > 10 * 1024 * 1024:
+                st.error("File too large (>10MB). Use a smaller dataset.")
+                st.stop()
 
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_json(uploaded_file)
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_json(uploaded_file)
 
-        if len(df) < 5:
-            st.error("Dataset too small (min 5 rows).")
-        else:
+            if len(df) < 5:
+                st.error("Dataset too small (min 5 rows).")
+                st.stop()
+            if len(df) > 10000:
+                st.warning("Large dataset detected (>10k rows). Sampling first 10k rows.")
+                df = df.iloc[:10000]
+
             if preprocess:
                 df = df.fillna(df.mean(numeric_only=True))
                 numeric_cols = df.select_dtypes(include=np.number).columns
+                if len(numeric_cols) == 0:
+                    st.error("No numeric data found.")
+                    st.stop()
                 df[numeric_cols] = (df[numeric_cols] - df[numeric_cols].min()) / (df[numeric_cols].max() - df[numeric_cols].min() + 1e-8)
 
             st.session_state.df = df
@@ -131,29 +152,35 @@ if uploaded_file:
 
             # Quick Insights
             if st.button("Quick Insights"):
+                logger.info("Generating quick insights...")
                 prompt = f"Summarize key stats for dataset: {df.describe().to_string()[:200]}"
                 insight = asyncio.run(get_llm_explanation(prompt))
                 st.markdown(f"<p class='insight-highlight'>📊 {insight}</p>", unsafe_allow_html=True)
 
             # Anomaly Detection
             numeric_cols = df.select_dtypes(include=np.number).columns
-            if len(numeric_cols) == 0:
-                st.error("No numeric data found.")
+            data = df[numeric_cols].values
+            st.write(f"Processing {len(df)} rows with {model_type}...")
+            logger.info(f"Running {model_type} on {len(df)} rows")
+            if model_type == "Isolation Forest":
+                model = IsolationForest(contamination=sensitivity/100, random_state=42)
+                preds = model.fit_predict(data)
+            elif model_type == "DBSCAN":
+                model = DBSCAN(eps=0.5, min_samples=5)
+                preds = model.fit_predict(data)
+                preds = np.where(preds == -1, -1, 1)
             else:
-                data = df[numeric_cols].values
-                if model_type == "Isolation Forest":
-                    model = IsolationForest(contamination=sensitivity/100, random_state=42)
-                    preds = model.fit_predict(data)
-                elif model_type == "DBSCAN":
-                    model = DBSCAN(eps=0.5, min_samples=5)
-                    preds = model.fit_predict(data)
-                    preds = np.where(preds == -1, -1, 1)
-                else:
-                    model = LocalOutlierFactor(n_neighbors=20, contamination=sensitivity/100)
-                    preds = model.fit_predict(data)
+                model = LocalOutlierFactor(n_neighbors=20, contamination=sensitivity/100)
+                preds = model.fit_predict(data)
 
-                df["anomaly"] = preds
-                st.session_state.anomalies = df[df["anomaly"] == -1]
+            df["anomaly"] = preds
+            st.session_state.anomalies = df[df["anomaly"] == -1]
+            logger.info(f"Detected {len(st.session_state.anomalies)} anomalies")
+            progress.progress(100)
+        except Exception as e:
+            logger.error(f"Error processing dataset: {str(e)}")
+            st.error(f"Error processing dataset: {str(e)}")
+            st.stop()
 
 if st.session_state.anomalies is not None:
     anomalies = st.session_state.anomalies
@@ -195,6 +222,7 @@ if st.session_state.anomalies is not None:
 
     # PDF Report
     if st.button("Download Enhanced PDF Report"):
+        logger.info("Generating PDF report...")
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter)
         styles = getSampleStyleSheet()
@@ -218,15 +246,17 @@ if st.session_state.anomalies is not None:
         b64 = base64.b64encode(buffer.read()).decode()
         href = f'<a href="data:application/pdf;base64,{b64}" download="anomaly_report.pdf">Download PDF</a>'
         st.markdown(href, unsafe_allow_html=True)
+        logger.info("PDF report generated")
 
 # Sample Datasets
 sample_type = st.selectbox("Load Sample Dataset", ["None", "Sales Data", "Sensor Logs"])
 if sample_type != "None":
+    logger.info(f"Loading sample dataset: {sample_type}")
     if sample_type == "Sales Data":
-        df = pd.DataFrame({"Date": pd.date_range("2025-01-01", periods=100), "Sales": np.random.normal(100, 10, 100)})
-        df.loc[50:55, "Sales"] *= 2
+        df = pd.DataFrame({"Date": pd.date_range("2025-01-01", periods=50), "Sales": np.random.normal(100, 10, 50)})
+        df.loc[30:35, "Sales"] *= 2
     else:
-        df = pd.DataFrame({"Time": pd.date_range("2025-01-01", periods=100), "Temp": np.random.normal(25, 2, 100)})
-        df.loc[70:75, "Temp"] += 10
+        df = pd.DataFrame({"Time": pd.date_range("2025-01-01", periods=50), "Temp": np.random.normal(25, 2, 50)})
+        df.loc[40:45, "Temp"] += 10
     st.session_state.df = df
     st.rerun()
