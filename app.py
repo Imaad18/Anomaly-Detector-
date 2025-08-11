@@ -182,6 +182,33 @@ if uploaded_file:
             st.error(f"Error processing dataset: {str(e)}")
             st.stop()
 
+# Sample Datasets
+st.subheader("Try a Sample Dataset")
+sample_type = st.selectbox("Select Sample Dataset", ["None", "Sales Data", "Sensor Logs"], key="sample_select")
+if st.button("Load Sample Data"):
+    logger.info(f"Loading sample dataset: {sample_type}")
+    try:
+        if sample_type == "Sales Data":
+            df = pd.DataFrame({
+                "Date": pd.date_range("2025-01-01", periods=30),
+                "Sales": [100, 102, 99, 101, 150, 148, 155, 100, 98, 103] * 3  # Static for reliability
+            })
+        elif sample_type == "Sensor Logs":
+            df = pd.DataFrame({
+                "Time": pd.date_range("2025-01-01", periods=30),
+                "Temp": [25, 24.5, 25.2, 26, 35, 34.8, 36, 25.1, 24.9, 25.3] * 3
+            })
+        else:
+            st.warning("Please select a valid sample dataset.")
+            st.stop()
+
+        st.session_state.df = df
+        st.write("Sample Dataset Loaded:", df.head())
+        logger.info("Sample dataset loaded successfully")
+    except Exception as e:
+        logger.error(f"Error loading sample dataset: {str(e)}")
+        st.error(f"Error loading sample dataset: {str(e)}")
+
 if st.session_state.anomalies is not None:
     anomalies = st.session_state.anomalies
     df = st.session_state.df
@@ -247,16 +274,3 @@ if st.session_state.anomalies is not None:
         href = f'<a href="data:application/pdf;base64,{b64}" download="anomaly_report.pdf">Download PDF</a>'
         st.markdown(href, unsafe_allow_html=True)
         logger.info("PDF report generated")
-
-# Sample Datasets
-sample_type = st.selectbox("Load Sample Dataset", ["None", "Sales Data", "Sensor Logs"])
-if sample_type != "None":
-    logger.info(f"Loading sample dataset: {sample_type}")
-    if sample_type == "Sales Data":
-        df = pd.DataFrame({"Date": pd.date_range("2025-01-01", periods=50), "Sales": np.random.normal(100, 10, 50)})
-        df.loc[30:35, "Sales"] *= 2
-    else:
-        df = pd.DataFrame({"Time": pd.date_range("2025-01-01", periods=50), "Temp": np.random.normal(25, 2, 50)})
-        df.loc[40:45, "Temp"] += 10
-    st.session_state.df = df
-    st.rerun()
