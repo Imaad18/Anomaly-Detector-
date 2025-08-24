@@ -1,3 +1,6 @@
+<img width="1920" height="911" alt="scrnli_daRAM7fZvH13ko" src="https://github.com/user-attachments/assets/c5d6873d-e590-44e7-834f-33b2888b128f" />
+
+
 # 🔮 AnomalyHunter AI Pro
 ### *Next-Generation AI-Powered Anomaly Detection Platform*
 
@@ -26,7 +29,7 @@ AnomalyHunter AI Pro is a sophisticated, production-ready anomaly detection plat
 
 ## 🚀 **Live Demo**
 
-🌐 **[Try AnomalyHunter AI Pro Live](https://your-deployed-app.streamlit.app)**
+🌐 https://sey5bbytubheqy8ohuayc2.streamlit.app/
 
 *Experience the power of AI-driven anomaly detection in your browser*
 
